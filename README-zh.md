@@ -10,7 +10,7 @@
 |---|---|
 | `MAX30102.c` | 程序入口：传感器初始化、采集循环、OLED 仪表盘 |
 | `algorithm.c` / `algorithm.h` | SpO2（比率法）和心率（自相关）估算 |
-| `max30102.c` / `max30102.h` | MAX30102 驱动（未修改） |
+| `max30102.c` / `max30102.h` | MAX30102 驱动 |
 | `ssd1306.c` / `ssd1306.h` | SSD1306 OLED 驱动（波特率改为可配置） |
 | `CMakeLists.txt` | 构建配置，默认为 Pico 2 (RP2350) |
 
