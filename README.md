@@ -11,9 +11,8 @@ built on top of the provided MAX30102 and SSD1306 drivers.
 |---|---|
 | `MAX30102.c` | Application entry point: sensor setup, acquisition loop, OLED dashboard |
 | `algorithm.c` / `algorithm.h` | SpO2 (ratio-of-ratios) and heart-rate (autocorrelation) estimation |
-| `max30102.c` / `max30102.h` | MAX30102 driver |
+| `max30102.c` / `max30102.h` | MAX30102 driver (upgraded, see [Library Upgrade](#library-upgrade)) |
 | `ssd1306.c` / `ssd1306.h` | SSD1306 OLED driver (baudrate made configurable via `SSD1306_I2C_BAUD`) |
-| `CMakeLists.txt` | Build configuration, defaults to Pico 2 (RP2350) |
 
 ## Wiring
 
@@ -84,6 +83,31 @@ read/write pointers match), and each (IR, RED) sample pair is fed into
 > `max30102_config_t` instead of `NULL`), and the SpO2 formula constants for
 > your specific hardware if accuracy matters.
 
+## Library Upgrade
+
+The MAX30102 driver was upgraded from the original provided version. Key
+improvements over the original:
+
+| Change | Old library | New library |
+|---|---|---|
+| `max30102_setup` return | `void` (silent failure) | **`bool`** — every I2C write checked |
+| `max30102_reset` | `sleep_ms(500)` blind wait | Polls MODE_CONFIG register until ready (≤10 ms) |
+| `max30102_check` pointer read | Two separate `read_reg` calls | Single 3-byte burst read (fewer I2C transactions) |
+| `max30102_check` return | Raw sample gap | **Actual decoded sample count** |
+| `max30102_read_temperature` | Reads stale register | **Triggers new conversion**, polls until complete |
+| `max30102_read_temperature_fixed` | Truncation `*625/100` | **Rounding** `(*625+50)/100` |
+| FIFO ring buffer wrapping | `if(n<0) n+=32` + `%=` | **`& FIFO_MASK` bitmask** (branchless) |
+| FIFO RED/IR byte order | **Swapped** (IR first, RED second) | **Correct** per datasheet (RED first, IR second) |
+
+> **Important**: The corrected RED/IR byte order in the new library means
+> `max30102_get_red()` and `max30102_get_ir()` now return the correct channels,
+> whereas the old library returned them swapped. To maintain compatibility with
+> the algorithm's original calibration, `spo2_algorithm_add_sample()` is
+> called with `(red, ir)` order in `MAX30102.c:107`.
+
+The original library files are preserved in `lib/old/`. The upgraded version
+with full API documentation is in `lib/update/`.
+
 ## Tuning notes
 
 * `SPO2_FINGER_THRESHOLD` (in `algorithm.h`): raise/lower based on the "IR DC"
@@ -98,9 +122,10 @@ read/write pointers match), and each (IR, RED) sample pair is fed into
 
 | Problem | Likely cause | Solution |
 |---|---|---|
-| OLED doesn't display | I2C1 baudrate too high | Ensure `SSD1306_I2C_BAUD=100000` (already set in `MAX30102.c`) |
+| OLED doesn't display | I2C1 baudrate too high | Confirm `SSD1306_I2C_BAUD=100000` is in CMakeLists.txt (not only in MAX30102.c) |
 | OLED doesn't display | Wiring error | Check GP6(SDA), GP7(SCL), 3.3V, GND connections |
 | OLED doesn't display | Missing pull-up resistors | Add external 4.7kΩ on GP6/GP7 to 3.3V |
 | MAX30102 not found | Wiring error | Check GP4(SDA), GP5(SCL), 3.3V, GND connections |
 | Readings always zero | Sensor not in contact | Place finger gently on the sensor |
 | SpO2/HR values erratic | Unstable finger contact | Keep finger still, avoid pressing too hard |
+| SpO2 abnormal after library upgrade | RED/IR channel order change | Ensure `spo2_algorithm_add_sample(red, ir)` is used (see [Library Upgrade](#library-upgrade)) |

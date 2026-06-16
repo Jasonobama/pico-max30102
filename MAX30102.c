@@ -104,7 +104,7 @@ int main(void) {
         while (max30102_available(&sensor) > 0) {
             uint32_t red = max30102_get_red(&sensor);
             uint32_t ir  = max30102_get_ir(&sensor);
-            spo2_algorithm_add_sample(ir, red);
+            spo2_algorithm_add_sample(red, ir);
             max30102_next_sample(&sensor);
         }
 
