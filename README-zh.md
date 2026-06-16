@@ -75,8 +75,6 @@ MAX30102 驱动已从原始版本升级。与旧版的主要差异：
 
 > **重要**：新版修正了 RED/IR 通道的字节序。为保持算法原有校准参数的有效性，`MAX30102.c:107` 中的 `spo2_algorithm_add_sample()` 调用使用 `(red, ir)` 顺序。
 
-原始库文件保存在 `lib/old/`，含完整 API 注释的升级版在 `lib/update/`。
-
 ## 调试说明
 
 * `SPO2_FINGER_THRESHOLD`（在 `algorithm.h` 中）：根据 OLED 上显示的"IR DC"值在有/无手指时的差异，调高或调低此阈值。

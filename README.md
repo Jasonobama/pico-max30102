@@ -105,9 +105,6 @@ improvements over the original:
 > the algorithm's original calibration, `spo2_algorithm_add_sample()` is
 > called with `(red, ir)` order in `MAX30102.c:107`.
 
-The original library files are preserved in `lib/old/`. The upgraded version
-with full API documentation is in `lib/update/`.
-
 ## Tuning notes
 
 * `SPO2_FINGER_THRESHOLD` (in `algorithm.h`): raise/lower based on the "IR DC"
