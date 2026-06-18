@@ -1,4 +1,4 @@
-# SpO2 / 心率监测器 (MAX30102 + SSD1306, Pico / Pico 2)
+﻿# SpO2 / 心率监测器 (MAX30102 + SSD1306, Pico / Pico 2)
 
 [English](README.md)
 
@@ -92,3 +92,64 @@ MAX30102 驱动已从原始版本升级。与旧版的主要差异：
 | 读数始终为 0 | 传感器未接触手指 | 将手指轻放在传感器上 |
 | SpO2/HR 值异常 | 手指接触不稳定 | 保持手指不动，避免按压过重 |
 | 升级库后 SpO2 异常 | RED/IR 通道顺序变化 | 确保使用 `spo2_algorithm_add_sample(red, ir)`（参见[库升级说明](#库升级说明)） |
+
+## 更新日志 
+
+### 2026-06-18
+
+### 双核架构改造（核心0：采集+显示，核心1：数据运算）
+
+原有的单核 superloop 已重构为双核架构，利用 RP2350 的双 Cortex-M33 核心，
+通过 Pico SDK `pico_multicore` 实现：
+
+| 核心 | 职责 | 使用的 I2C 外设 |
+|------|------|----------------|
+| 核心0 | MAX30102 传感器采集 + SSD1306 OLED 显示 | I2C0 + I2C1 |
+| 核心1 | SpO2 / 心率计算 (algorithm.c) | 无 |
+
+**核间通信**：64 槽 SPSC 环形缓冲区 (`shared_fifo_t`) 由硬件 spinlock 保护。
+核心0（采集器）推入原始 RED/IR 样本；核心1（计算器）取出后送入算法处理。
+计算结果通过独立的 spinlock 保护的结果缓冲区 (`shared_result_t`) 发布。
+
+如需回退到单核模式调试，取消 `MAX30102.c` 顶部 `#define SINGLE_CORE` 的注释即可。
+
+### 性能优化
+
+* **流式 RMS 计算** (`algorithm.c`)：AC 平方和 (`sum_sq_ir` / `sum_sq_red`) 在
+  `spo2_algorithm_add_sample()` 中增量累加，不再在每次 `spo2_algorithm_compute()`
+  调用时遍历 100 个样本重算。
+* **核心1 空闲休眠**从 5ms 降至 1ms，更快响应新数据。
+
+### 内存优化
+
+* **共享 FIFO** 从 128 槽缩减为 64 槽（节省 512 字节 SRAM）。在 25 Hz 有效采样率下，
+  64 槽仍提供 2.56 秒缓冲，远超 4 秒计算窗口需求。
+* **移除未用库** `hardware_dma` 和 `hardware_pio`（`CMakeLists.txt`）。
+
+### 可靠性优化
+
+* **硬件看门狗** (`hardware_watchdog`，3 秒超时)：若核心0 主循环停滞（如 I2C 总线挂死），
+  芯片自动复位。每次主循环迭代均调用 `watchdog_update()` 喂狗。
+* **`isfinite()` 数值守卫** (`spo2_algorithm_compute()`)：SpO2 值通过 `isfinite(spo2)`
+  检测后才标记为有效；心率额外限定在 30–250 BPM 范围内并进行 `isfinite(hr)` 检测。
+  防止传感器异常数据产生的 NaN/Inf 进入 OLED 显示。
+
+### 功耗优化
+
+* **自适应轮询**：当 `finger_present == false` 时，核心0 轮询间隔从 20ms（50Hz）提升到
+  100ms（10Hz），空闲期间功耗降低约 5 倍。检测到手指后自动恢复 50Hz 轮询。
+
+### 代码质量提升
+
+* **`printf` 封装为 `DBG_PRINTF`**：所有调试输出由 `MAX30102.c` 顶部的 `#define DEBUG`
+  控制。注释该宏即可生成无 USB stdio 开销的发布版本。
+* **传感器配置参数化**：命名结构体 `g_sensor_cfg`（类型 `max30102_config_t`）替代
+  硬编码 `NULL` 默认值。LED 电流、采样率、平均次数、ADC 量程等参数集中在一处可见可调。
+* **OLED 刷新间隔**由 `OLED_REFRESH_MS` 宏（默认 1000ms）统一控制。
+* **初始化进度显示**：`show_init_progress()` 在启动阶段于 OLED 依次显示 "Sensor detect"
+  和 "Acquiring data..."，消除此前 4 秒空白等待。
+
+### 构建变更 (`CMakeLists.txt`)
+
+* 新增：`pico_multicore`（双核支持）、`hardware_watchdog`（看门狗）。
+* 移除：`hardware_dma`、`hardware_pio`（应用程序未使用）。

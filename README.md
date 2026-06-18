@@ -1,4 +1,4 @@
-# SpO2 / Heart-Rate Monitor (MAX30102 + SSD1306, Pico / Pico 2)
+﻿# SpO2 / Heart-Rate Monitor (MAX30102 + SSD1306, Pico / Pico 2)
 
 [中文](README-zh.md)
 
@@ -126,3 +126,74 @@ improvements over the original:
 | Readings always zero | Sensor not in contact | Place finger gently on the sensor |
 | SpO2/HR values erratic | Unstable finger contact | Keep finger still, avoid pressing too hard |
 | SpO2 abnormal after library upgrade | RED/IR channel order change | Ensure `spo2_algorithm_add_sample(red, ir)` is used (see [Library Upgrade](#library-upgrade)) |
+
+## Updates
+
+### 2026-06-18
+
+### Dual-Core Architecture (Core 0: Acquisition + Display, Core 1: Computation)
+
+The original single-core superloop has been refactored into a dual-core architecture
+leveraging the RP2350's two Cortex-M33 cores via Pico SDK `pico_multicore`:
+
+| Core | Role | I2C peripherals |
+|------|------|-----------------|
+| Core 0 | MAX30102 sensor acquisition + SSD1306 OLED display | I2C0 + I2C1 |
+| Core 1 | SpO2 / heart-rate computation (algorithm.c) | none |
+
+**Inter-core communication**: A 64-slot SPSC ring buffer (`shared_fifo_t`) is guarded by
+a hardware spinlock. Core 0 (producer) pushes raw RED/IR samples; Core 1 (calculator)
+pops them for algorithm processing. Computed results are published through a separate
+spinlock-protected result buffer (`shared_result_t`).
+
+To revert to the original single-core behavior for debugging, uncomment `#define SINGLE_CORE` at the top of `MAX30102.c`.
+
+### Performance
+
+* **Streaming RMS** (`algorithm.c`): AC sum-of-squares (`sum_sq_ir` / `sum_sq_red`) is
+  accumulated incrementally in `spo2_algorithm_add_sample()` rather than recomputed
+  by looping over 100 samples in every `spo2_algorithm_compute()` call.
+* **Core 1 sleep reduced** from 5 ms to 1 ms when idle — faster response to new samples.
+
+### Memory
+
+* **Shared FIFO reduced** from 128 to 64 slots (512 bytes saved). At the effective
+  sample rate of 25 Hz, 64 slots still provide 2.56 seconds of buffering — well above
+  the 4-second computation window requirement.
+* **Removed unused libraries** `hardware_dma` and `hardware_pio` from `CMakeLists.txt`.
+
+### Reliability
+
+* **Hardware watchdog** (`hardware_watchdog`, 3 s timeout): if Core 0's main loop stalls
+  (e.g. due to an I2C bus hang), the chip is automatically reset. `watchdog_update()`
+  is called in every loop iteration.
+* **`isfinite()` guards** in `spo2_algorithm_compute()`: SpO2 values are checked with
+  `isfinite(spo2)` before marking them valid; heart rate is additionally bounded to
+  30–250 BPM with `isfinite(hr)`. This prevents NaN/Inf from corrupt sensor data
+  reaching the OLED display.
+
+### Power Saving
+
+* **Adaptive polling**: when `finger_present == false`, the Core 0 polling interval
+  increases from 20 ms (50 Hz) to 100 ms (10 Hz), reducing power consumption ~5×
+  during idle periods. The polling rate automatically returns to 50 Hz when a
+  finger is detected.
+
+### Code Quality
+
+* **`printf` wrapped in `DBG_PRINTF`**: all debug output is gated by a `#define DEBUG`
+  at the top of `MAX30102.c`. Comment out the `#define` to produce a release build
+  with zero USB stdio overhead.
+* **Sensor configuration parameterized**: a named `g_sensor_cfg` struct (type
+  `max30102_config_t`) replaces the hardcoded `NULL` default. LED currents, sample
+  rate, averaging, and ADC range are all visible and tunable in one place.
+* **OLED refresh period** is controlled by a single `OLED_REFRESH_MS` macro
+  (default 1000 ms).
+* **Initialization progress display**: `show_init_progress()` shows "Sensor detect"
+  then "Acquiring data..." on the OLED during startup, replacing the previous
+  4-second blank screen.
+
+### Build Changes (`CMakeLists.txt`)
+
+* Added: `pico_multicore` (dual-core support), `hardware_watchdog` (watchdog timer).
+* Removed: `hardware_dma`, `hardware_pio` (not used by the application code).
