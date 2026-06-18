@@ -148,8 +148,3 @@ MAX30102 驱动已从原始版本升级。与旧版的主要差异：
 * **OLED 刷新间隔**由 `OLED_REFRESH_MS` 宏（默认 1000ms）统一控制。
 * **初始化进度显示**：`show_init_progress()` 在启动阶段于 OLED 依次显示 "Sensor detect"
   和 "Acquiring data..."，消除此前 4 秒空白等待。
-
-### 构建变更 (`CMakeLists.txt`)
-
-* 新增：`pico_multicore`（双核支持）、`hardware_watchdog`（看门狗）。
-* 移除：`hardware_dma`、`hardware_pio`（应用程序未使用）。

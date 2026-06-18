@@ -193,7 +193,3 @@ To revert to the original single-core behavior for debugging, uncomment `#define
   then "Acquiring data..." on the OLED during startup, replacing the previous
   4-second blank screen.
 
-### Build Changes (`CMakeLists.txt`)
-
-* Added: `pico_multicore` (dual-core support), `hardware_watchdog` (watchdog timer).
-* Removed: `hardware_dma`, `hardware_pio` (not used by the application code).
